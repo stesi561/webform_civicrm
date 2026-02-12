@@ -2570,6 +2570,7 @@ class WebformCivicrmPostProcess extends WebformCivicrmBase implements WebformCiv
         }
         elseif ($dataType == 'File') {
           // Replace filename (with tokens) if set.
+          $newFilename = NULL;
           if (isset($component['#file_name']) && $component['#file_name']) {
             $newFilename = $this->handler->tokenManager->replace($component['#file_name'], $this->submission);
           }
