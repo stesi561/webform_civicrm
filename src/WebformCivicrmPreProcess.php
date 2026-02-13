@@ -109,12 +109,22 @@ class WebformCivicrmPreProcess extends WebformCivicrmBase implements WebformCivi
     // Early return if the form (or page) was already submitted
     $triggering_element = $this->form_state->getTriggeringElement();
 
-    // When user uploads a file using a managed_file element, populate
-    // contact options before returning to ensure they persist in the cached form.
+    // When user uploads a file using a managed_file element, avoid making any change to $this->form.
     if ($this->form_state->hasFileElement()
       && is_array($triggering_element['#submit'])
       && in_array('file_managed_file_submit', $triggering_element['#submit'], TRUE)) {
-      $this->fillForm($this->form, $this->form_state->getValues());
+      // We need to ensure that we ensure that the file required fields are set appropriately.
+      // This is the second pass through this method,
+      // On the first pass through the conditional fails due to $this->form_state->hasFileElement
+      // But the second time through we end up here.
+
+      // Initially we get here via Drupal\Core\Form\FormBuilder->buildForm
+      // $this->form_state has file element is null.
+      //
+      // We return via $this->processForm and at this point we bail.
+      // but the require field status has been flicked back.
+      // so we need to recurse over form and updated required status of fields.
+      $this->updateRequiredOnFileFields($this->form);
       return;
     }
 
@@ -487,6 +497,42 @@ class WebformCivicrmPreProcess extends WebformCivicrmBase implements WebformCivi
   }
 
   /**
+   * Recursively walk through the form array and update required flag
+   * on CiviCRM file fields if file is already provided.
+   *
+   * This is a subset of what is done in fillForm.
+   *
+   * @param array $elements (reference)
+   *   FAPI form array
+   */
+  private function updateRequiredOnFileFields(&$elements) {
+    foreach ($elements as $eid => &$element) {
+      if ($eid[0] == '#' || !is_array($element)) {
+        continue;
+      }
+      // Recurse through nested elements
+      $this->updateRequiredOnFileFields($element);
+      if (empty($element['#type']) || $element['#type'] == 'fieldset') {
+        continue;
+      }
+      // Check if this is a CiviCRM file Field
+      $pieces = $this->utils->wf_crm_explode_key($eid);
+      if (!is_array($pieces)){
+        return;
+      }
+      [ , $c, $ent, $n, $table, $name] = $pieces;
+      $fileInfo = $this->getFileInfo($name, $val, $ent, $n);
+      if (!is_array($fileInfo )){
+        return;
+      }
+      if (!empty($val)) {
+        $element['#required'] = FALSE;
+        unset($element['#states']['required']);
+      }
+    }
+  }
+
+  /**
    * Recursively walk through form array and set properties of CiviCRM fields
    *
    * @param array $elements (reference)
@@ -593,7 +639,10 @@ class WebformCivicrmPreProcess extends WebformCivicrmBase implements WebformCivi
                   'eid' => $eid,
                   'fileInfo' => $fileInfo
                 ];
-                // Unset required attribute on the file if its loaded from civicrm.
+		// Unset required attribute on the file if its loaded from civicrm.
+		// We repeat this logic in $this->updateRequiredOnFileFields
+		// as for some cases we are not getting to this point.
+		// if updating this logic check this method too.
                 if (!empty($val)) {
                   $element['#required'] = FALSE;
                   unset($element['#states']['required']);
